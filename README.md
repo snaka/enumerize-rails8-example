@@ -22,10 +22,12 @@ This demo application implements a User management system that demonstrates vari
 - **Hobbies**: reading, sports, cooking, gaming, music, travel
 
 ### 3. Enumerize Features
+- **Hash-based definitions**: Using `{ admin: 'Administrator', manager: 'Manager' }` for display names
 - **Predicates**: `user.admin?`, `user.manager?`, etc.
 - **Scopes**: `User.with_status(:active)`
 - **Default values**: role defaults to `:employee`, status defaults to `:active`
 - **Text representation**: `user.role.text` returns human-readable values
+- **Bulk operations**: Testing `insert_all` and `upsert_all` compatibility
 
 ## Requirements
 
@@ -78,15 +80,18 @@ The application provides a full CRUD interface for managing users:
 class User < ApplicationRecord
   extend Enumerize
 
-  # Single value with predicates
+  # Symbol array definition (should work consistently with bulk operations)
   enumerize :role, in: [:admin, :manager, :employee, :intern], 
             default: :employee, predicates: true
 
-  # Single value with scopes
-  enumerize :status, in: [:active, :inactive, :suspended], 
-            default: :active, scope: true
+  # Hash definition with numeric values (potential issues with bulk operations in some versions)
+  enumerize :status, in: {
+    active: 0,
+    inactive: 1,
+    suspended: 3
+  }, default: :active, scope: true
 
-  # Multiple values
+  # Multiple values with Symbol array (should work consistently)
   serialize :hobbies, coder: JSON, type: Array
   enumerize :hobbies, in: [:reading, :sports, :cooking, :gaming, :music, :travel], 
             multiple: true
@@ -122,24 +127,103 @@ User.with_status(:suspended)  # => Returns all suspended users
 
 The application comes with pre-seeded data featuring 6 users with different combinations of roles, statuses, and hobbies. Run `rails db:seed` to populate the database.
 
+## Testing the Issue with RSpec
+
+This application includes RSpec tests that demonstrate the bulk operations issue. The tests are written to show that operations which should normally succeed actually fail in Rails 8 with this specific configuration.
+
+```bash
+# Run the tests to see the failures
+bundle exec rspec spec/models/user_enumerize_bulk_operations_spec.rb
+
+# Run with detailed output
+bundle exec rspec spec/models/user_enumerize_bulk_operations_spec.rb --format documentation
+```
+
+### Expected Test Results
+
+When running the tests, you should see:
+- ✅ 7 passing tests (regular operations and configuration checks)
+- ❌ 4 failing tests (bulk operations with Hash-based enum on integer columns)
+
+The failing tests demonstrate that:
+1. `insert_all` with string enum values incorrectly saves 'active' instead of 'inactive' or 'suspended'
+2. `upsert_all` has the same issue
+3. Multiple different status values all become 'active'
+4. Updates via `upsert_all` fail to change the status
+
+These failures confirm the issue exists in your environment.
+
+### Key Findings
+
+1. **🚨 CRITICAL ISSUE IDENTIFIED**: Hash-based enumerize with integer columns fails with bulk operations
+2. **Symbol arrays** (role, hobbies) behave consistently with bulk operations
+3. **Regular create operations** work correctly with all enum types
+4. **String values in bulk operations** get incorrectly converted when using integer columns
+5. **Invalid enum values** are handled gracefully (fall back to defaults)
+6. **Callbacks are skipped** during bulk operations (as expected)
+7. **Scopes and queries work normally** after bulk insertion
+
+### 🐛 The Core Problem
+
+When using **Hash-based enumerize with integer database columns**, bulk operations (`insert_all`, `upsert_all`) fail because:
+
+- `"inactive".to_i` → `0` (maps to "active")
+- `"suspended".to_i` → `0` (maps to "active")  
+- Rails bypasses enumerize's conversion logic during bulk operations
+- All string enum values become the first enum value (default)
+
+### Testing Different Enum Types
+
+This application demonstrates both approaches:
+- **Symbol arrays**: `[:admin, :manager, :employee]` - consistent behavior
+- **Hash definitions with numeric values**: `{ active: 0, inactive: 1, suspended: 3 }` - potential issue source in some versions
+
+### 🔍 Reproduction Case
+
+This application reproduces the exact issue:
+
+**Database Schema:**
+```ruby
+# status column is INTEGER with numeric Hash enumerize
+create_table :users do |t|
+  t.integer :status, default: 0  # INTEGER column!
+end
+
+enumerize :status, in: { active: 0, inactive: 1, suspended: 3 }
+```
+
+**The Problem:**
+```ruby
+# ✅ Works correctly
+User.create!(status: "inactive")  # → inactive
+
+# ❌ Fails - becomes "active" instead of "inactive"  
+User.insert_all([{status: "inactive"}])  # → active (wrong!)
+
+# ✅ Works if you use numeric values
+User.insert_all([{status: 1}])  # → inactive (correct)
+```
+
+**Root Cause:** Rails' bulk operations convert `"inactive"` to `0` via `String#to_i`, bypassing enumerize's proper conversion logic.
+
 ## Project Structure
 
 ```
 app/
 ├── controllers/
-│   └── users_controller.rb    # CRUD operations
+│   └── users_controller.rb           # CRUD operations
 ├── models/
-│   └── user.rb               # User model with enumerize
+│   └── user.rb                      # User model with mixed enumerize types
 ├── views/
-│   └── users/                # User views
-│       ├── _form.html.erb    # Shared form partial
-│       ├── index.html.erb    # User listing
-│       ├── show.html.erb     # User details
-│       ├── new.html.erb      # New user form
-│       └── edit.html.erb     # Edit user form
-└── db/
-    └── seeds.rb              # Sample data
-
+│   └── users/                       # User views for manual testing
+spec/
+├── models/
+│   └── user_enumerize_bulk_operations_spec.rb # Tests that fail due to the issue
+├── spec_helper.rb                            # RSpec configuration
+└── rails_helper.rb                          # Rails-specific RSpec config
+db/
+├── migrate/                         # Database migrations including integer conversion
+└── seeds.rb                        # Sample data
 ```
 
 ## Key Learning Points
