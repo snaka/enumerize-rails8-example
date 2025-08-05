@@ -98,3 +98,5 @@ config/local/*
 doc/
 *.orig
 .rspec_status
+
+*.local.json
