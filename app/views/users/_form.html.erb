@@ -1,0 +1,41 @@
+<%= form_with(model: user) do |form| %>
+  <% if user.errors.any? %>
+    <div style="color: red">
+      <h2><%= pluralize(user.errors.count, "error") %> prohibited this user from being saved:</h2>
+      <ul>
+        <% user.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div>
+    <%= form.label :name %>
+    <%= form.text_field :name %>
+  </div>
+
+  <div>
+    <%= form.label :email %>
+    <%= form.email_field :email %>
+  </div>
+
+  <div>
+    <%= form.label :role %>
+    <%= form.select :role, options_for_select(User.role.options) %>
+  </div>
+
+  <div>
+    <%= form.label :status %>
+    <%= form.select :status, options_for_select(User.status.options) %>
+  </div>
+
+  <div>
+    <%= form.label :hobbies, 'Hobbies (multiple selection)' %>
+    <%= form.select :hobbies, options_for_select(User.hobbies.options), {}, multiple: true %>
+  </div>
+
+  <div>
+    <%= form.submit %>
+  </div>
+<% end %>
