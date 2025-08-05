@@ -1,13 +1,17 @@
 class User < ApplicationRecord
   extend Enumerize
 
-  # Role
+  # Role (using Symbol array - should work fine)
   enumerize :role, in: [:admin, :manager, :employee, :intern], default: :employee, predicates: true
 
-  # Status
-  enumerize :status, in: [:active, :inactive, :suspended], default: :active, scope: true
+  # Status (using Hash with numeric values - this might cause issues with bulk operations)
+  enumerize :status, in: {
+    active: 0,
+    inactive: 1,
+    suspended: 3
+  }, default: :active, scope: true
 
-  # Hobbies (multiple selection)
+  # Hobbies (using Symbol array - should work fine)
   serialize :hobbies, coder: JSON, type: Array
   enumerize :hobbies, in: [:reading, :sports, :cooking, :gaming, :music, :travel], multiple: true
 
